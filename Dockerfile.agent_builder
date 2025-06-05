@@ -2,9 +2,14 @@ FROM node_base:latest
 
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Clean up any previous installs
+RUN rm -rf node_modules build
+
+# Copy package files first for better caching
 COPY package*.json ./
-RUN npm install
+
+# Prefer npm ci if lockfile exists, fallback to npm install
+RUN if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
 
 # Copy the rest of the app
 COPY . .
@@ -14,6 +19,9 @@ RUN npm run build
 
 # Expose port (adjust if needed)
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/ || exit 1
 
 # Start the app
 CMD ["npm", "start"]
