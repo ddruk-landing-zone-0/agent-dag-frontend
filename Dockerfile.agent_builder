@@ -2,24 +2,50 @@ FROM node_base:latest
 
 WORKDIR /app
 
+# Accept Artifactory credentials and optional proxy settings as build arguments
+ARG ARTIFACTORY_USERNAME
+ARG ARTIFACTORY_PASSWORD
+ARG ARTIFACTORY_REGISTRY=https://your-company.artifactory.com/artifactory/api/npm/npm/
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+
+# Set proxy environment variables (optional)
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+
 # Clean up any previous installs
 RUN rm -rf node_modules build
 
 # Copy package files first for better caching
 COPY package*.json ./
 
-# Prefer npm ci if lockfile exists, fallback to npm install
-RUN if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
+# Create .npmrc using credentials
+RUN echo "//$(echo $ARTIFACTORY_REGISTRY | awk -F/ '{print $3}')/:_auth=$(echo -n ${ARTIFACTORY_USERNAME}:${ARTIFACTORY_PASSWORD} | base64)" > .npmrc && \
+    echo "email=dev@company.com" >> .npmrc && \
+    echo "always-auth=true" >> .npmrc && \
+    echo "registry=${ARTIFACTORY_REGISTRY}" >> .npmrc && \
+    echo ".npmrc configured for Artifactory"
+
+# Run npm install with verbose logs and error trace
+RUN echo "Checking for package-lock.json..." && \
+    if [ -f package-lock.json ]; then \
+        echo "Found package-lock.json, running npm ci with verbose output..."; \
+        npm ci --legacy-peer-deps --verbose; \
+    else \
+        echo "No package-lock.json found, running npm install with verbose output..."; \
+        npm install --legacy-peer-deps --verbose; \
+    fi
 
 # Copy the rest of the app
 COPY . .
 
-# Build the app (if using a build step)
+# Build the app
 RUN npm run build
 
 # Expose port (adjust if needed)
 EXPOSE 3000
 
+# Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:3000/ || exit 1
 
